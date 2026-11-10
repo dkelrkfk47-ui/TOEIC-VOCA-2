@@ -691,6 +691,20 @@ function startQuiz(onlyWrong){
    .map(w=>w[answerKey])
  );
 
+ // 990점 모드에서는 심화 데이터가 있는 단어만 출제
+if($("difficulty").value==="advanced"){
+  pool=pool.filter(w=>{
+    const data=advanced[key(w)];
+
+    if(!data)return false;
+
+    const answerType=direction==="en"?"ko":"en";
+
+    return Array.isArray(data[answerType]) &&
+           data[answerType].length>=3;
+  });
+}
+
  if(distinct.size<4){
   alert("서로 다른 정답이 최소 4개 필요합니다.");
   return;
