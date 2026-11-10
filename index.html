@@ -633,7 +633,13 @@ function getChoices(w,category){
  const fallback=shuffle(
   [...new Set(pool.map(x=>x[answerKey]))]
    .filter(x=>x!==correct)
- );
+   .filter(x=>{
+     if(direction==="en"){
+       return /[가-힣]/.test(x);
+     }
+     return true;
+   })
+);
 
  for(const item of fallback){
 
