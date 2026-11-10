@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOEIC VOCA MASTER</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+*{box-sizing:border-box}
+body{
+ font-family:Arial,sans-serif;
+ background:#f1f5f9;
+ margin:0;
+ padding:16px;
+ color:#1e293b;
+}
+.container{
+ max-width:550px;
+ margin:auto;
+}
+h1{text-align:center;color:#2563eb}
+.card{
+ background:white;
+ padding:22px;
+ border-radius:16px;
+ margin-bottom:16px;
+ box-shadow:0 3px 12px #0001;
+}
+button,select,input{
+ width:100%;
+ padding:14px;
+ margin:7px 0;
+ border-radius:10px;
+ border:1px solid #cbd5e1;
+ font-size:16px;
+}
+button{
+ background:#2563eb;
+ color:white;
+ border:none;
+ cursor:pointer;
+}
+button:disabled{opacity:.5}
+.option{
+ background:#f8fafc;
+ color:#1e293b;
+ border:1px solid #cbd5e1;
+ text-align:left;
+}
+.correct{background:#bbf7d0!important}
+.wrong{background:#fecaca!important}
+.hidden{display:none}
+.center{text-align:center}
+.small{font-size:13px;color:#64748b}
+.progress{
+ background:#e2e8f0;
+ height:9px;
+ border-radius:9px;
+ overflow:hidden;
+}
+.bar{
+ background:#2563eb;
+ height:100%;
+ width:0%;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>📚 TOEIC VOCA MASTER</h1>
+
+<div id="home" class="card">
+<h2>단어장 관리</h2>
+
+<input type="file" id="excel" accept=".xlsx,.xls">
+
+<select id="importMode">
+<option value="replace">기존 단어장 교체</option>
+<option value="add">기존 단어장에 추가</option>
+</select>
+
+<p id="wordCount">등록된 단어: 0개</p>
+
+<hr>
+
+<h2>퀴즈 설정</h2>
+
+<label>학습 범위</label>
+<select id="category">
+<option value="all">단어 + 숙어</option>
+<option value="word">단어</option>
+<option value="phrase">숙어</option>
+</select>
+
+<label>출제 방향</label>
+<select id="direction">
+<option value="en">영어 → 한국어</option>
+<option value="ko">한국어 → 영어</option>
+</select>
+
+<label>진행 방식</label>
+<select id="mode">
+<option value="study">학습 모드</option>
+<option value="exam">시험 모드</option>
+</select>
+
+<label>문제 수</label>
+<select id="amount">
+<option value="10">10문제</option>
+<option value="20">20문제</option>
+<option value="50">50문제</option>
+<option value="all">전체 문제</option>
+</select>
+
+<label>출제 방식</label>
+<select id="order">
+<option value="random">완전 랜덤</option>
+<option value="weak">자주 틀린 단어 우선</option>
+</select>
+
+<button onclick="startQuiz(false)">시험 시작</button>
+<button onclick="startQuiz(true)">오답노트 재시험</button>
+<button onclick="showWrong()">오답노트 보기</button>
+</div>
+
+<div id="quiz" class="card hidden">
+<p id="progressText"></p>
+<div class="progress"><div id="bar" class="bar"></div></div>
+
+<h2 id="question" class="center"></h2>
+<div id="options"></div>
+<p id="feedback" class="center"></p>
+
+<button id="nextBtn" class="hidden" onclick="nextQuestion()">
+다음 문제
+</button>
+</div>
+
+<div id="result" class="card hidden">
+<h2 class="center">시험 결과</h2>
+<h1 id="score"></h1>
+<p id="resultText" class="center"></p>
+<div id="review"></div>
+<button onclick="goHome()">메인 화면</button>
+</div>
+
+<div id="wrongPage" class="card hidden">
+<h2>오답노트</h2>
+<div id="wrongList"></div>
+<button onclick="goHome()">메인 화면</button>
+</div>
+
+</div>
+
+<script>
+const STORE="toeic_voca_words_v1";
+const WRONG="toeic_voca_wrong_v1";
+
+let words=JSON.parse(localStorage.getItem(STORE)||"[]");
+let wrong=JSON.parse(localStorage.getItem(WRONG)||"{}");
+
+let questions=[];
+let index=0;
+let answers=[];
+let currentMode="study";
+let direction="en";
+
+const $=id=>document.getElementById(id);
+
+function save(){
+ localStorage.setItem(STORE,JSON.stringify(words));
+ localStorage.setItem(WRONG,JSON.stringify(wrong));
+ updateCount();
+}
+
+function updateCount(){
+ $("wordCount").textContent=
+ "등록된 단어 및 숙어: "+words.length+"개";
+}
+
+function key(w){
+ return w.type+"|"+w.en+"|"+w.ko;
+}
+
+function shuffle(arr){
+ return [...arr].sort(()=>Math.random()-.5);
+}
+
+$("excel").addEventListener("change",async e=>{
+ const file=e.target.files[0];
+ if(!file)return;
+
+ try{
+  const data=await file.arrayBuffer();
+  const workbook=XLSX.read(data,{type:"array"});
+  let imported=[];
+
+  workbook.SheetNames.forEach(name=>{
+   const sheet=workbook.Sheets[name];
+   const rows=XLSX.utils.sheet_to_json(sheet,{
+    header:1,defval:""
+   });
+
+   rows.forEach(row=>{
+    const a=String(row[0]||"").trim();
+    const b=String(row[1]||"").trim();
+    const f=String(row[5]||"").trim();
+    const g=String(row[6]||"").trim();
+
+    if(a&&b)imported.push({
+     en:a,ko:b,type:"word"
+    });
+
+    if(f&&g)imported.push({
+     en:f,ko:g,type:"phrase"
+    });
+   });
+  });
+
+  if($("importMode").value==="replace"){
+   words=[];
+   wrong={};
+  }
+
+  const map=new Map();
+  [...words,...imported].forEach(w=>{
+   map.set(key(w),w);
+  });
+
+  words=[...map.values()];
+  save();
+
+  alert(imported.length+"개 항목을 읽었습니다.");
+ }catch(err){
+  alert("엑셀 파일을 읽지 못했습니다.");
+ }
+
+ e.target.value="";
+});
+
+function startQuiz(onlyWrong){
+ let category=$("category").value;
+ direction=$("direction").value;
+ currentMode=$("mode").value;
+
+ let pool=words.filter(w=>
+  category==="all"||w.type===category
+ );
+
+ if(onlyWrong){
+  pool=pool.filter(w=>wrong[key(w)]>0);
+ }
+
+ const answerKey=direction==="en"?"ko":"en";
+
+ const distinct=new Set(pool.map(w=>w[answerKey]));
+
+ if(distinct.size<4){
+  alert("서로 다른 정답이 최소 4개 필요합니다.");
+  return;
+ }
+
+ if($("order").value==="weak"){
+  pool=shuffle(pool);
+  pool.sort((a,b)=>
+   (wrong[key(b)]||0)-(wrong[key(a)]||0)
+  );
+ }else{
+  pool=shuffle(pool);
+ }
+
+ const amount=$("amount").value;
+ const count=amount==="all"?
+  pool.length:Math.min(Number(amount),pool.length);
+
+ questions=pool.slice(0,count).map(w=>{
+  const others=shuffle(
+   [...new Set(
+    words.filter(x=>
+     x[answerKey]!==w[answerKey] &&
+     (category==="all"||x.type===category)
+    ).map(x=>x[answerKey])
+   )]
+  ).slice(0,3);
+
+  return {
+   word:w,
+   choices:shuffle([w[answerKey],...others])
+  };
+ });
+
+ // 보기가 4개 미만인 문제 제외
+ questions=questions.filter(q=>q.choices.length===4);
+
+ if(!questions.length){
+  alert("출제 가능한 문제가 없습니다.");
+  return;
+ }
+
+ index=0;
+ answers=[];
+
+ showPage("quiz");
+ renderQuestion();
+}
+
+function showPage(id){
+ ["home","quiz","result","wrongPage"].forEach(x=>
+  $(x).classList.add("hidden")
+ );
+ $(id).classList.remove("hidden");
+}
+
+function renderQuestion(){
+ const q=questions[index];
+ const questionKey=direction==="en"?"en":"ko";
+
+ $("progressText").textContent=
+ `문제 ${index+1} / ${questions.length}`;
+
+ $("bar").style.width=
+ `${index/questions.length*100}%`;
+
+ $("question").textContent=q.word[questionKey];
+ $("feedback").textContent="";
+ $("nextBtn").classList.add("hidden");
+
+ const area=$("options");
+ area.innerHTML="";
+
+ q.choices.forEach((choice,i)=>{
+  const btn=document.createElement("button");
+  btn.className="option";
+  btn.textContent=
+   String.fromCharCode(65+i)+". "+choice;
+  btn.onclick=()=>selectAnswer(choice,btn);
+  area.appendChild(btn);
+ });
+}
+
+function selectAnswer(choice,button){
+ const q=questions[index];
+ const answerKey=direction==="en"?"ko":"en";
+ const correct=q.word[answerKey];
+ const isCorrect=choice===correct;
+
+ answers.push({
+  word:q.word,
+  selected:choice,
+  correct,
+  isCorrect
+ });
+
+ if(!isCorrect){
+  const k=key(q.word);
+  wrong[k]=(wrong[k]||0)+1;
+  save();
+ }
+
+ if(currentMode==="exam"){
+  nextQuestion();
+  return;
+ }
+
+ const buttons=$("options").querySelectorAll("button");
+
+ buttons.forEach(btn=>{
+  btn.disabled=true;
+
+  if(btn.textContent.slice(3)===correct){
+   btn.classList.add("correct");
+  }
+ });
+
+ if(!isCorrect)button.classList.add("wrong");
+
+ $("feedback").textContent=isCorrect?
+ "✅ 정답입니다!":"❌ 정답: "+correct;
+
+ $("nextBtn").classList.remove("hidden");
+}
+
+function nextQuestion(){
+ index++;
+
+ if(index>=questions.length){
+  finishQuiz();
+ }else{
+  renderQuestion();
+ }
+}
+
+function finishQuiz(){
+ showPage("result");
+
+ const correct=answers.filter(a=>a.isCorrect).length;
+ const total=answers.length;
+ const percent=Math.round(correct/total*100);
+
+ $("score").textContent=percent+"점";
+ $("resultText").textContent=
+ `${total}문제 중 ${correct}문제 정답`;
+
+ const review=$("review");
+ review.innerHTML="<h3>틀린 문제</h3>";
+
+ const missed=answers.filter(a=>!a.isCorrect);
+
+ if(!missed.length){
+  review.append("모든 문제를 맞혔습니다!");
+ }
+
+ missed.forEach(a=>{
+  const p=document.createElement("p");
+  p.textContent=
+   `${a.word.en} : ${a.word.ko}
+   | 선택: ${a.selected}`;
+  review.appendChild(p);
+ });
+}
+
+function showWrong(){
+ showPage("wrongPage");
+
+ const list=$("wrongList");
+ list.innerHTML="";
+
+ const items=words.filter(w=>wrong[key(w)]>0);
+
+ if(!items.length){
+  list.textContent="저장된 오답이 없습니다.";
+  return;
+ }
+
+ items.sort((a,b)=>
+  wrong[key(b)]-wrong[key(a)]
+ );
+
+ items.forEach(w=>{
+  const p=document.createElement("p");
+  p.textContent=
+   `${w.en} — ${w.ko}
+   (오답 ${wrong[key(w)]}회)`;
+  list.appendChild(p);
+ });
+}
+
+function goHome(){
+ showPage("home");
+ updateCount();
+}
+
+updateCount();
+</script>
+</body>
+</html>
